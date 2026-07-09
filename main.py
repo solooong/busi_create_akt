@@ -21,7 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger("main")
 
 
-def main(root_dir: str, trigger: str = "ДДУ"):
+def main(root_dir: str):
     """
     Главная функция консольного прототипа.
     1. Обходит корневую папку, находит и распаковывает ZIP-архивы.
@@ -30,41 +30,39 @@ def main(root_dir: str, trigger: str = "ДДУ"):
     4. Сохраняет результат в Excel в текущей директории.
     """
     logger.info(f"Запуск обработки. Корневая папка: {root_dir}")
-    if not os.path.isdir(root_dir):
-        logger.error(f"Указанная папка не существует: {root_dir}")
-        sys.exit(1)
-
-    # Шаг 1: извлечение из ZIP и получение списка PDF с триггером
-    pdf_files = process_folder(root_dir, trigger=trigger)
+    
+    # Шаг 1: поиск и распаковка
+    triggers = {"ДДУ", "Договор долевого участия"}  # можно добавить другие
+    pdf_files = process_folder(root_dir, triggers=triggers)
+    
+    # Фильтруем только PDF
+    pdf_files = [f for f in pdf_files if f.lower().endswith('.pdf')]
+    
     if not pdf_files:
-        logger.warning("Не найдено ни одного PDF-файла для обработки. Завершение.")
+        logger.warning("Не найдено PDF-файлов для обработки.")
         return
-
-    # Шаг 2: парсинг каждого PDF
+    
+    # Шаг 2: парсинг
     parser = DDUParser()
-    # Конфиг парсера (можно позже вынести в общий конфиг)
-    parser_config = {
-        'trigger_section': 'участники долевого строительства'
-    }
+    # main.py (фрагмент)
     all_participants = []
+    seen_participants = set()
     for pdf_path in pdf_files:
         logger.info(f"Обрабатывается PDF: {pdf_path}")
-        participants = parser.parse(pdf_path, parser_config)
-        if participants:
-            logger.info(f"  Найдено участников: {len(participants)}")
-            all_participants.extend(participants)
-        else:
-            logger.warning(f"  Участники не извлечены из {pdf_path}")
-
-    if not all_participants:
-        logger.warning("Ни одного участника не извлечено из всех PDF. Excel не будет создан.")
-        return
-
+        participants = parser.parse(pdf_path)
+        for p in participants:
+            # Уникальный ключ: ФИО + дата рождения
+            key = (p['ФИО'], p['доп_данные'].get('дата_рождения', ''))
+            if key not in seen_participants:
+                seen_participants.add(key)
+                all_participants.append(p)    
     # Шаг 3: сохранение в Excel
-    writer = ExcelWriter()
-    # Сохраняем в текущей папке, имя с датой
-    output_path = writer.save(all_participants)
-    logger.info(f"Готово! Результат сохранён в {output_path}")
+    if all_participants:
+        writer = ExcelWriter()
+        output_path = writer.save(all_participants)
+        logger.info(f"Готово! Результат сохранён в {output_path}")
+    else:
+        logger.warning("Ни одного участника не извлечено.")
 
 
 if __name__ == "__main__":

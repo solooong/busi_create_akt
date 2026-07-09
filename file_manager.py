@@ -1,12 +1,10 @@
 # file_manager.py
 import os
 import zipfile
-import shutil
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Set
 
-# Настройка логирования (можно позже вынести в общий конфиг)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -15,10 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def find_zip_files(root_dir: str, max_depth: int = 2) -> List[str]:
-    """
-    Обходит каталог root_dir и все подкаталоги до глубины max_depth,
-    собирая пути всех файлов с расширением .zip (регистр не учитывается).
-    """
+    """Обходит каталог root_dir на глубину max_depth, собирает пути всех .zip файлов."""
     zip_files = []
     root_path = Path(root_dir).resolve()
     if not root_path.exists():
@@ -27,10 +22,8 @@ def find_zip_files(root_dir: str, max_depth: int = 2) -> List[str]:
 
     logger.info(f"Поиск ZIP-файлов в {root_path} (глубина: {max_depth})...")
     for current_root, dirs, files in os.walk(root_path):
-        # Вычисляем текущую глубину относительно root_path
         relative_depth = len(Path(current_root).relative_to(root_path).parts)
         if relative_depth > max_depth:
-            # Пропускаем вложенность глубже заданной
             dirs.clear()
             continue
         for file in files:
@@ -43,13 +36,9 @@ def find_zip_files(root_dir: str, max_depth: int = 2) -> List[str]:
 
 
 def extract_zip(zip_path: str, extract_to: str) -> bool:
-    """
-    Извлекает содержимое zip_path в папку extract_to.
-    Возвращает True при успехе, False при ошибке.
-    """
+    """Извлекает содержимое zip_path в папку extract_to. Возвращает True при успехе."""
     try:
         with zipfile.ZipFile(zip_path, 'r') as zf:
-            # Создаём целевую папку, если её нет
             os.makedirs(extract_to, exist_ok=True)
             zf.extractall(extract_to)
             logger.info(f"Распакован: {zip_path} -> {extract_to}")
@@ -59,10 +48,11 @@ def extract_zip(zip_path: str, extract_to: str) -> bool:
         return False
 
 
-def find_files_with_trigger(directory: str, trigger: str) -> List[str]:
+def find_files_with_triggers(directory: str, triggers: Set[str]) -> List[str]:
     """
     Рекурсивно ищет в directory файлы, в имени которых содержится
-    подстрока trigger (без учёта регистра). Возвращает список полных путей.
+    хотя бы одна из подстрок triggers (без учёта регистра).
+    Возвращает список полных путей.
     """
     matched = []
     directory_path = Path(directory)
@@ -70,83 +60,87 @@ def find_files_with_trigger(directory: str, trigger: str) -> List[str]:
         logger.warning(f"Папка для поиска не найдена: {directory_path}")
         return matched
 
-    logger.info(f"Поиск файлов с триггером '{trigger}' в {directory_path}...")
+    logger.info(f"Поиск файлов с триггерами {triggers} в {directory_path}...")
     for root, _, files in os.walk(directory_path):
         for file in files:
-            if trigger.lower() in file.lower():
+            file_lower = file.lower()
+            # Проверяем, содержит ли имя файла хотя бы один из триггеров
+            if any(trigger.lower() in file_lower for trigger in triggers):
                 full_path = os.path.join(root, file)
                 matched.append(full_path)
                 logger.debug(f"Найден подходящий файл: {full_path}")
-    logger.info(f"Найдено файлов с триггером '{trigger}': {len(matched)}")
+    logger.info(f"Найдено файлов: {len(matched)}")
     return matched
 
 
 def process_folder(
     root_dir: str,
-    trigger: str = "ДДУ",
+    triggers: Optional[Set[str]] = None,
     extract_base_dir: Optional[str] = None
 ) -> List[str]:
     """
-    Основная функция для Шага 1:
+    Основная функция:
     1. Ищет ZIP-архивы в root_dir (глубина 2).
-    2. Распаковывает каждый архив в подпапку временной/локальной папки.
-    3. Ищет в полученных файлах те, что содержат trigger в имени.
+    2. Распаковывает каждый архив во временную папку.
+    3. Ищет файлы, содержащие хотя бы один из triggers в имени.
     4. Возвращает список путей к этим файлам.
     
     Параметры:
         root_dir: корневая папка для обхода (может быть сетевой)
-        trigger: подстрока для фильтрации имён файлов (по умолчанию "ДДУ")
+        triggers: множество подстрок для фильтрации имён файлов
+                  (по умолчанию {"ДДУ", "Договор долевого участия"})
         extract_base_dir: папка для распаковки. Если None, создаётся
-                         временная директория "extracted" внутри root_dir.
+                         "_extracted" внутри root_dir.
     """
-    # Базовая папка для распаковки
+    # Значения по умолчанию
+    if triggers is None:
+        triggers = {"ДДУ", "Договор долевого участия"}
+    
     if extract_base_dir is None:
         extract_base_dir = os.path.join(root_dir, "_extracted")
-        logger.info(f"Используется временная папка для распаковки: {extract_base_dir}")
-
-    # Убедимся, что базовая папка существует
+    
+    logger.info(f"Используется временная папка для распаковки: {extract_base_dir}")
     os.makedirs(extract_base_dir, exist_ok=True)
 
-    # Поиск ZIP
+    # Поиск и распаковка ZIP
     zip_paths = find_zip_files(root_dir, max_depth=2)
     if not zip_paths:
         logger.warning("Не найдено ни одного ZIP-архива. Завершение.")
         return []
 
-    # Распаковка каждого ZIP в отдельную папку
     extracted_dirs = []
     for zip_path in zip_paths:
-        # Имя папки для распаковки = имя ZIP без расширения + суффикс для уникальности
         zip_name = os.path.splitext(os.path.basename(zip_path))[0]
         dest_dir = os.path.join(extract_base_dir, zip_name)
-        # Если папка уже существует (например, от предыдущего запуска), добавим счётчик
+        
+        # Уникальное имя папки, если уже существует
         counter = 1
         original_dest_dir = dest_dir
         while os.path.exists(dest_dir):
             dest_dir = f"{original_dest_dir}_{counter}"
             counter += 1
-        success = extract_zip(zip_path, dest_dir)
-        if success:
+        
+        if extract_zip(zip_path, dest_dir):
             extracted_dirs.append(dest_dir)
 
-    # Поиск файлов с заданным триггером во всех папках распаковки
+    # Поиск файлов с триггерами во всех распакованных папках
     matched_files = []
     for ext_dir in extracted_dirs:
-        files = find_files_with_trigger(ext_dir, trigger)
+        files = find_files_with_triggers(ext_dir, triggers)
         matched_files.extend(files)
 
-    logger.info(f"Итого файлов '{trigger}' для обработки: {len(matched_files)}")
+    logger.info(f"Итого файлов для обработки: {len(matched_files)}")
     return matched_files
 
 
 if __name__ == "__main__":
-    # Тестовый запуск: передаём папку как аргумент командной строки
     import sys
     if len(sys.argv) > 1:
         test_root = sys.argv[1]
     else:
-        test_root = "."  # текущая папка по умолчанию
-    result = process_folder(test_root)
+        test_root = "."
+    # Тест с несколькими триггерами
+    result = process_folder(test_root, triggers={"ДДУ", "Договор"})
     print("\nНайденные файлы для обработки:")
     for f in result:
         print(f" - {f}")
