@@ -7,6 +7,10 @@ from tkinter import Checkbutton, Tk, Frame, Label, Entry, Button, Text, Scrollba
 from tkinter import filedialog, ttk, messagebox
 from pathlib import Path
 from ai_checker import AIChecker
+from datetime import datetime
+import os
+
+# Получаем текущую дату в формате ГГГГ_ММ_ДД
 
 # Импорты наших модулей
 from file_manager import process_folder
@@ -14,7 +18,7 @@ from pdf_parser import DDUParser
 from excel_writer import ExcelWriter
 from docx_filler import DocxFiller
 
-
+current_date = datetime.now().strftime("%Y_%m_%d")
 class LogHandler(logging.Handler):
     """Обработчик логов для вывода в GUI."""
     def __init__(self, text_widget):
@@ -32,18 +36,18 @@ class Application(Frame):
         super().__init__(master)
         self.master = master
         self.master.title("Парсер ДДУ и генератор актов")
-        self.master.geometry("800x600")
+        self.master.geometry("800x800")
         self.master.resizable(True, True)
         
         # Переменные
         self.folder_path = StringVar(value=os.getcwd())
-        self.triggers = StringVar(value="ДДУ, Договор долевого участия")
+        self.triggers = StringVar(value="ДДУ, Договор долевого участия,Договор участия в долевом строительстве")
         self.pdf_trigger = StringVar(value="участники долевого строительства")
         self.template_path = StringVar(value="")
         self.running = BooleanVar(value=False)
         self.ai_check = BooleanVar(value=False)
-        self.ai_api_url = StringVar(value="http://localhost:1234/v1/chat/completions")
-        self.ai_api_token = StringVar(value="")
+        self.ai_api_url = StringVar(value="http://87.103.253.223:1234/v1/chat/completions")
+        self.ai_api_token = StringVar(value="sk-lm-oPeN5xTy:JWPSzgAj1W44Rouiv3qN")
         self.ai_model = StringVar(value="local-model")
         self.create_widgets()
         self.setup_logging()
@@ -241,7 +245,7 @@ class Application(Frame):
                 logger.info("Проверка AI завершена")
             # Шаг 3: сохранение в Excel
             writer = ExcelWriter()
-            excel_path = writer.save(all_participants, os.path.join(self.folder_path.get(), f"participants.xlsx"))
+            excel_path = writer.save(all_participants, os.path.join(self.folder_path.get(), f"participants_{current_date}.xlsx"))
             logger.info(f"Excel сохранён: {excel_path}")
             
             # Шаг 4: заполнение актов

@@ -101,24 +101,37 @@ class AIChecker:
         except Exception as e:
             logger.error(f"AI: неожиданная ошибка: {e}")
             return extracted
-
     def _parse_response(self, response_data: dict, fallback: dict) -> dict:
-        """Парсит ответ от API."""
         try:
             content = response_data['choices'][0]['message']['content']
-            # Убираем маркеры ```json ... ```
             content = re.sub(r'^```(?:json)?\s*', '', content.strip())
             content = re.sub(r'\s*```$', '', content)
             
             fixed = json.loads(content)
+            
+            # Нормализация: всё кроме ФИО/телефон/email → доп_данные
+            normalized = {
+                'ФИО': fixed.pop('ФИО', fallback.get('ФИО', '')),
+                'телефон': fixed.pop('телефон', fallback.get('телефон', '')),
+                'email': fixed.pop('email', fallback.get('email', '')),
+                'доп_данные': {}
+            }
+            
+            # Собираем доп_данные
+            extra = fixed.pop('доп_данные', {}) if isinstance(fixed.get('доп_данные'), dict) else {}
+            # Всё оставшееся тоже в доп_данные
+            extra.update(fixed)
+            normalized['доп_данные'] = extra
+            
             logger.info("AI успешно проверил данные")
-            return fixed
+            return normalized
+            
         except (KeyError, json.JSONDecodeError) as e:
             logger.warning(f"AI вернул некорректный JSON: {e}")
             return fallback
     def _build_prompt(self, full_text: str, extracted: dict) -> str:
         """Создаёт промпт для LLM."""
-        text_snippet = full_text if len(full_text) <= 4000 else full_text[:4000]
+        text_snippet = full_text #if len(full_text) <= 4000 else full_text[:4000]
         
         prompt = f"""Проверь и исправь извлечённые данные участника долевого строительства на основе ПОЛНОГО текста договора.
 
@@ -144,7 +157,7 @@ class AIChecker:
 
     7. Кем выдан: полное название органа, выдавшего паспорт. Не должно содержать реквизитов застройщика (ИНН, ОГРН, расчётный счёт, БИК и т.п.). Убрать "ода,", "да," и другой мусор в начале.
 
-    8. Код подразделения: формат XXX-XXX (3 цифры, дефис, 3 цифры). Относится к участнику.
+    8. Код подразделения: формат XXX-XXX (3 цифры, дефис, 3 цифры). Иногда может быть пропуск дефиса. Относится к участнику. 
 
     9. Адрес проживания: полный адрес с городом, улицей, домом, квартирой. Адрес регистрации участника. Не путать с юридическим адресом застройщика и адресом строительства.
 
@@ -180,5 +193,7 @@ class AIChecker:
     - Не путай данные участника с данными застройщика (ООО СЗ «КМ», ИНН 5404305790).
     - Не путай данные участника с данными банков (АО «Альфа-Банк», ПАО «Сбербанк», АО «Банк ДОМ.РФ»).
     - Если данных нет в тексте, оставь поле пустым.
+    - Иногда имена полей могут начинаться не с заглавной буквы. При поиске в наименовании полей, старайся найти по любому из регистров. 
+    - Используй предыдущие результаты поиска для понимания структуры хранения и возможных написаний данных 
     - Верни ТОЛЬКО исправленный JSON, без комментариев и без форматирования markdown."""
         return prompt
