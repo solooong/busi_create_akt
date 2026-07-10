@@ -42,7 +42,9 @@ class Application(Frame):
         self.template_path = StringVar(value="")
         self.running = BooleanVar(value=False)
         self.ai_check = BooleanVar(value=False)
-
+        self.ai_api_url = StringVar(value="http://localhost:1234/v1/chat/completions")
+        self.ai_api_token = StringVar(value="")
+        self.ai_model = StringVar(value="local-model")
         self.create_widgets()
         self.setup_logging()
     
@@ -71,7 +73,18 @@ class Application(Frame):
 
         Checkbutton(settings_frame, text="Проверка через AI (LM Studio)", variable=self.ai_check).grid(
     row=4, column=0, columnspan=3, sticky='w', padx=5, pady=5
-)
+)       
+        ai_frame = Frame(settings_frame, padx=5, pady=5)
+        ai_frame.grid(row=5, column=0, columnspan=3, sticky='ew', pady=5)
+
+        Label(ai_frame, text="API URL:").grid(row=0, column=0, sticky='w', padx=5)
+        Entry(ai_frame, textvariable=self.ai_api_url, width=50).grid(row=0, column=1, padx=5)
+
+        Label(ai_frame, text="Токен:").grid(row=1, column=0, sticky='w', padx=5)
+        Entry(ai_frame, textvariable=self.ai_api_token, width=50, show="*").grid(row=1, column=1, padx=5)
+
+        Label(ai_frame, text="Модель:").grid(row=2, column=0, sticky='w', padx=5)
+        Entry(ai_frame, textvariable=self.ai_model, width=50).grid(row=2, column=1, padx=5)
         # --- Центральная панель: лог ---
         log_frame = Frame(self.master, padx=10, pady=5)
         log_frame.pack(fill='both', expand=True)
@@ -207,10 +220,13 @@ class Application(Frame):
                 return
             
             logger.info(f"Всего уникальных участников: {len(all_participants)}")
-            # AI проверка
             if self.ai_check.get() and all_participants:
                 logger.info("Запущена проверка через AI...")
-                checker = AIChecker()
+                checker = AIChecker(
+                    api_url=self.ai_api_url.get(),
+                    api_token=self.ai_api_token.get() or None,
+                    model=self.ai_model.get()
+                )
                 for idx, (p, pdf_path) in enumerate(participants_with_pdf):
                     try:
                         full_text = DDUParser.get_full_text(pdf_path)
