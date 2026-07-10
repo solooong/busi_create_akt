@@ -1,4 +1,6 @@
 # excel_writer.py
+# . Что далее надо в них добавить: структурирование колонок в EXcel
+
 import logging
 from datetime import datetime
 from pathlib import Path

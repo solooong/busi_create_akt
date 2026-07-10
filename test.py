@@ -1,4 +1,9 @@
 # extract_text.py
+    # """
+    # Извлекает весь текст из PDF и сохраняет в TXT файл.
+    # Сохраняет текст каждой страницы с разделителями.
+    # """
+
 import pdfplumber
 import sys
 import os

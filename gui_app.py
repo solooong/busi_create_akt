@@ -1,0 +1,246 @@
+# gui_app.py
+import os
+import sys
+import threading
+import logging
+from tkinter import Tk, Frame, Label, Entry, Button, Text, Scrollbar, StringVar, BooleanVar
+from tkinter import filedialog, ttk, messagebox
+from pathlib import Path
+
+# Импорты наших модулей
+from file_manager import process_folder
+from pdf_parser import DDUParser
+from excel_writer import ExcelWriter
+from docx_filler import DocxFiller
+
+
+class LogHandler(logging.Handler):
+    """Обработчик логов для вывода в GUI."""
+    def __init__(self, text_widget):
+        super().__init__()
+        self.text_widget = text_widget
+
+    def emit(self, record):
+        msg = self.format(record)
+        self.text_widget.insert('end', msg + '\n')
+        self.text_widget.see('end')
+
+
+class Application(Frame):
+    def __init__(self, master=None):
+        super().__init__(master)
+        self.master = master
+        self.master.title("Парсер ДДУ и генератор актов")
+        self.master.geometry("800x600")
+        self.master.resizable(True, True)
+        
+        # Переменные
+        self.folder_path = StringVar(value=os.getcwd())
+        self.triggers = StringVar(value="ДДУ, Договор долевого участия")
+        self.pdf_trigger = StringVar(value="участники долевого строительства")
+        self.template_path = StringVar(value="")
+        self.running = BooleanVar(value=False)
+        
+        self.create_widgets()
+        self.setup_logging()
+    
+    def create_widgets(self):
+        # --- Верхняя панель: настройки ---
+        settings_frame = Frame(self.master, padx=10, pady=10)
+        settings_frame.pack(fill='x')
+        
+        # Папка
+        Label(settings_frame, text="Корневая папка:").grid(row=0, column=0, sticky='w', padx=5, pady=5)
+        Entry(settings_frame, textvariable=self.folder_path, width=60).grid(row=0, column=1, padx=5, pady=5)
+        Button(settings_frame, text="Обзор...", command=self.select_folder).grid(row=0, column=2, padx=5, pady=5)
+        
+        # Триггеры файлов
+        Label(settings_frame, text="Триггеры файлов (через запятую):").grid(row=1, column=0, sticky='w', padx=5, pady=5)
+        Entry(settings_frame, textvariable=self.triggers, width=60).grid(row=1, column=1, padx=5, pady=5)
+        
+        # Триггер PDF
+        Label(settings_frame, text="Триггер в PDF:").grid(row=2, column=0, sticky='w', padx=5, pady=5)
+        Entry(settings_frame, textvariable=self.pdf_trigger, width=60).grid(row=2, column=1, padx=5, pady=5)
+        
+        # Шаблон акта
+        Label(settings_frame, text="Шаблон акта:").grid(row=3, column=0, sticky='w', padx=5, pady=5)
+        Entry(settings_frame, textvariable=self.template_path, width=60).grid(row=3, column=1, padx=5, pady=5)
+        Button(settings_frame, text="Обзор...", command=self.select_template).grid(row=3, column=2, padx=5, pady=5)
+        
+        # --- Центральная панель: лог ---
+        log_frame = Frame(self.master, padx=10, pady=5)
+        log_frame.pack(fill='both', expand=True)
+        
+        Label(log_frame, text="Лог выполнения:").pack(anchor='w')
+        
+        self.log_text = Text(log_frame, height=20, wrap='word')
+        self.log_text.pack(side='left', fill='both', expand=True)
+        
+        scrollbar = Scrollbar(log_frame, command=self.log_text.yview)
+        scrollbar.pack(side='right', fill='y')
+        self.log_text.config(yscrollcommand=scrollbar.set)
+        
+        # --- Нижняя панель: прогресс и кнопка запуска ---
+        bottom_frame = Frame(self.master, padx=10, pady=10)
+        bottom_frame.pack(fill='x')
+        
+        self.progress = ttk.Progressbar(bottom_frame, mode='indeterminate')
+        self.progress.pack(fill='x', padx=5, pady=5)
+        
+        self.run_button = Button(
+            bottom_frame, 
+            text="Запустить обработку", 
+            command=self.run_processing,
+            bg='#4CAF50',
+            fg='white',
+            font=('Arial', 12, 'bold'),
+            padx=20,
+            pady=5
+        )
+        self.run_button.pack(pady=10)
+    
+    def setup_logging(self):
+        """Настраивает логирование в Text виджет."""
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+        
+        # Удаляем старые хендлеры
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+        
+        # Хендлер для GUI
+        gui_handler = LogHandler(self.log_text)
+        gui_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        logger.addHandler(gui_handler)
+        
+        # Хендлер для файла
+        file_handler = logging.FileHandler('processing.log', encoding='utf-8')
+        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        logger.addHandler(file_handler)
+    
+    def select_folder(self):
+        """Диалог выбора папки."""
+        folder = filedialog.askdirectory(title="Выберите корневую папку", initialdir=self.folder_path.get())
+        if folder:
+            self.folder_path.set(folder)
+    
+    def select_template(self):
+        """Диалог выбора шаблона акта."""
+        file_path = filedialog.askopenfilename(
+            title="Выберите шаблон акта",
+            filetypes=[("Word документы", "*.docx"), ("Все файлы", "*.*")],
+            initialdir=self.folder_path.get()
+        )
+        if file_path:
+            self.template_path.set(file_path)
+    
+    def run_processing(self):
+        """Запускает обработку в отдельном потоке."""
+        if self.running.get():
+            messagebox.showwarning("Предупреждение", "Обработка уже выполняется")
+            return
+        
+        # Валидация
+        folder = self.folder_path.get()
+        if not os.path.isdir(folder):
+            messagebox.showerror("Ошибка", "Выбранная папка не существует")
+            return
+        
+        self.running.set(True)
+        self.run_button.config(state='disabled', text="Обработка...")
+        self.progress.start()
+        
+        # Запуск в отдельном потоке
+        thread = threading.Thread(target=self.process_data, daemon=True)
+        thread.start()
+    
+    def process_data(self):
+        """Основной процесс обработки данных."""
+        logger = logging.getLogger()
+        
+        try:
+            # Шаг 1: поиск файлов
+            logger.info("="*60)
+            logger.info("НАЧАЛО ОБРАБОТКИ")
+            logger.info("="*60)
+            
+            triggers_set = {t.strip() for t in self.triggers.get().split(',') if t.strip()}
+            logger.info(f"Триггеры файлов: {triggers_set}")
+            
+            pdf_files = process_folder(self.folder_path.get(), triggers=triggers_set)
+            pdf_files = [f for f in pdf_files if f.lower().endswith('.pdf')]
+            
+            if not pdf_files:
+                logger.warning("Не найдено PDF-файлов для обработки")
+                self.finish_processing()
+                return
+            
+            logger.info(f"Найдено PDF-файлов: {len(pdf_files)}")
+            
+            # Шаг 2: парсинг PDF
+            parser = DDUParser()
+            pdf_trigger = self.pdf_trigger.get()
+            
+            all_participants = []
+            seen = set()
+            
+            for i, pdf_path in enumerate(pdf_files, 1):
+                logger.info(f"[{i}/{len(pdf_files)}] Обрабатывается: {os.path.basename(pdf_path)}")
+                
+                participants = parser.parse(pdf_path, {'trigger_section': pdf_trigger})
+                
+                for p in participants:
+                    key = (p.get('ФИО', ''), p.get('доп_данные', {}).get('дата_рождения', ''))
+                    if key not in seen:
+                        seen.add(key)
+                        all_participants.append(p)
+                
+                logger.info(f"  Извлечено участников: {len(participants)}")
+            
+            if not all_participants:
+                logger.warning("Ни одного участника не извлечено")
+                self.finish_processing()
+                return
+            
+            logger.info(f"Всего уникальных участников: {len(all_participants)}")
+            
+            # Шаг 3: сохранение в Excel
+            writer = ExcelWriter()
+            excel_path = writer.save(all_participants, os.path.join(self.folder_path.get(), f"participants.xlsx"))
+            logger.info(f"Excel сохранён: {excel_path}")
+            
+            # Шаг 4: заполнение актов
+            template = self.template_path.get()
+            if template and os.path.exists(template):
+                akt_dir = os.path.join(self.folder_path.get(), "Акты")
+                os.makedirs(akt_dir, exist_ok=True)
+                
+                filler = DocxFiller(template)
+                created = filler.fill_multiple_acts(all_participants, akt_dir)
+                logger.info(f"Создано актов: {len(created)}")
+            else:
+                logger.info("Шаблон акта не указан или не найден — акты не созданы")
+            
+            logger.info("="*60)
+            logger.info("ОБРАБОТКА УСПЕШНО ЗАВЕРШЕНА")
+            logger.info("="*60)
+            
+        except Exception as e:
+            logger.error(f"КРИТИЧЕСКАЯ ОШИБКА: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        finally:
+            self.finish_processing()
+    
+    def finish_processing(self):
+        """Сбрасывает состояние UI после завершения обработки."""
+        self.running.set(False)
+        self.progress.stop()
+        self.run_button.config(state='normal', text="Запустить обработку")
+
+
+if __name__ == "__main__":
+    root = Tk()
+    app = Application(master=root)
+    app.mainloop()
