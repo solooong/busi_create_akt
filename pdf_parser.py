@@ -279,7 +279,15 @@ class DDUParser(BaseParser):
             contacts_list.append(contact)
 
         return contacts_list
-
+    @staticmethod
+    def get_full_text(pdf_path: str) -> str:
+        """Извлекает весь текст из PDF для проверки AI."""
+        with pdfplumber.open(pdf_path) as pdf:
+            return "\n".join(
+                re.sub(r'Страница\s+\d+\s+из\s+\d+', '', page.extract_text() or '')
+                for page in pdf.pages
+            )
+        
     def parse(self, pdf_path: str, config: Optional[Dict] = None) -> List[Dict]:
         if not pdf_path.lower().endswith('.pdf'):
             logger.warning(f"Пропущен не-PDF файл: {pdf_path}")

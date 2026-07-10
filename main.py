@@ -3,6 +3,7 @@ import os
 import sys
 import logging
 from pathlib import Path
+from docx_filler import DocxFiller
 
 # Импорты наших модулей
 from file_manager import process_folder
@@ -63,7 +64,14 @@ def main(root_dir: str):
         logger.info(f"Готово! Результат сохранён в {output_path}")
     else:
         logger.warning("Ни одного участника не извлечено.")
-
+    template_path = os.path.join(root_dir, "template_akt.docx")
+    if os.path.exists(template_path):
+        akt_dir = os.path.join(root_dir, "Акты")
+        filler = DocxFiller(template_path)
+        created = filler.fill_multiple_acts(all_participants, akt_dir)
+        logger.info(f"Создано актов: {len(created)}")
+    else:
+        logger.warning(f"Шаблон акта не найден: {template_path}")
 
 if __name__ == "__main__":
     # Если передан аргумент командной строки, используем его как корневую папку

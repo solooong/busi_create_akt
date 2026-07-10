@@ -3,9 +3,10 @@ import os
 import sys
 import threading
 import logging
-from tkinter import Tk, Frame, Label, Entry, Button, Text, Scrollbar, StringVar, BooleanVar
+from tkinter import Checkbutton, Tk, Frame, Label, Entry, Button, Text, Scrollbar, StringVar, BooleanVar
 from tkinter import filedialog, ttk, messagebox
 from pathlib import Path
+from ai_checker import AIChecker
 
 # Импорты наших модулей
 from file_manager import process_folder
@@ -40,7 +41,8 @@ class Application(Frame):
         self.pdf_trigger = StringVar(value="участники долевого строительства")
         self.template_path = StringVar(value="")
         self.running = BooleanVar(value=False)
-        
+        self.ai_check = BooleanVar(value=False)
+
         self.create_widgets()
         self.setup_logging()
     
@@ -66,7 +68,10 @@ class Application(Frame):
         Label(settings_frame, text="Шаблон акта:").grid(row=3, column=0, sticky='w', padx=5, pady=5)
         Entry(settings_frame, textvariable=self.template_path, width=60).grid(row=3, column=1, padx=5, pady=5)
         Button(settings_frame, text="Обзор...", command=self.select_template).grid(row=3, column=2, padx=5, pady=5)
-        
+
+        Checkbutton(settings_frame, text="Проверка через AI (LM Studio)", variable=self.ai_check).grid(
+    row=4, column=0, columnspan=3, sticky='w', padx=5, pady=5
+)
         # --- Центральная панель: лог ---
         log_frame = Frame(self.master, padx=10, pady=5)
         log_frame.pack(fill='both', expand=True)
@@ -184,17 +189,16 @@ class Application(Frame):
             all_participants = []
             seen = set()
             
+            participants_with_pdf = []  # список кортежей (участник, путь к pdf)
             for i, pdf_path in enumerate(pdf_files, 1):
                 logger.info(f"[{i}/{len(pdf_files)}] Обрабатывается: {os.path.basename(pdf_path)}")
-                
                 participants = parser.parse(pdf_path, {'trigger_section': pdf_trigger})
-                
                 for p in participants:
                     key = (p.get('ФИО', ''), p.get('доп_данные', {}).get('дата_рождения', ''))
                     if key not in seen:
                         seen.add(key)
                         all_participants.append(p)
-                
+                        participants_with_pdf.append((p, pdf_path))
                 logger.info(f"  Извлечено участников: {len(participants)}")
             
             if not all_participants:
@@ -203,7 +207,22 @@ class Application(Frame):
                 return
             
             logger.info(f"Всего уникальных участников: {len(all_participants)}")
-            
+            # AI проверка
+            if self.ai_check.get() and all_participants:
+                logger.info("Запущена проверка через AI...")
+                checker = AIChecker()
+                for idx, (p, pdf_path) in enumerate(participants_with_pdf):
+                    try:
+                        full_text = DDUParser.get_full_text(pdf_path)
+                        if full_text:
+                            fixed = checker.check_participant(full_text, p)
+                            all_participants[idx] = fixed
+                            logger.info(f"AI проверил участника: {fixed.get('ФИО', p.get('ФИО', ''))}")
+                        else:
+                            logger.warning(f"Нет текста для проверки {p.get('ФИО', '')}")
+                    except Exception as e:
+                        logger.error(f"Ошибка AI для {p.get('ФИО', '')}: {e}")
+                logger.info("Проверка AI завершена")
             # Шаг 3: сохранение в Excel
             writer = ExcelWriter()
             excel_path = writer.save(all_participants, os.path.join(self.folder_path.get(), f"participants.xlsx"))

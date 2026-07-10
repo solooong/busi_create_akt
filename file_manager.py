@@ -94,7 +94,7 @@ def process_folder(
     """
     # Значения по умолчанию
     if triggers is None:
-        triggers = {"ДДУ", "Договор долевого участия"}
+        triggers = {"ДДУ", "Договор долевого участия", "Договор участия в долевом строительстве"}
     
     if extract_base_dir is None:
         extract_base_dir = os.path.join(root_dir, "_extracted")
