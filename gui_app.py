@@ -101,17 +101,20 @@ class Application(Frame):
         scrollbar = Scrollbar(log_frame, command=self.log_text.yview)
         scrollbar.pack(side='right', fill='y')
         self.log_text.config(yscrollcommand=scrollbar.set)
-        
+
+       
+        # self.acts_button.pack(pady=10)
         # --- Нижняя панель: прогресс и кнопка запуска ---
         bottom_frame = Frame(self.master, padx=10, pady=10)
         bottom_frame.pack(fill='x')
-        
+
         self.progress = ttk.Progressbar(bottom_frame, mode='indeterminate')
         self.progress.pack(fill='x', padx=5, pady=5)
-        
+
+        # Кнопка 1: Парсинг PDF
         self.run_button = Button(
             bottom_frame, 
-            text="Запустить обработку", 
+            text="Запустить обработку PDF", 
             command=self.run_processing,
             bg='#4CAF50',
             fg='white',
@@ -119,8 +122,122 @@ class Application(Frame):
             padx=20,
             pady=5
         )
-        self.run_button.pack(pady=10)
-    
+        self.run_button.pack(pady=5)
+
+        # Кнопка 2: Только акты из Excel
+        self.acts_button = Button(
+            bottom_frame,
+            text="Заполнить акты из Excel",
+            command=self.run_acts_processing,
+            bg='#2196F3',
+            fg='white',
+            font=('Arial', 12, 'bold'),
+            padx=20,
+            pady=5
+        )
+        self.acts_button.pack(pady=10)
+    # Добавьте методы:
+    def run_acts_processing(self):
+        """Запускает заполнение актов из Excel в отдельном потоке."""
+        if self.running.get():
+            messagebox.showwarning("Предупреждение", "Обработка уже выполняется")
+            return
+        
+        # Выбор Excel-файла
+        excel_path = filedialog.askopenfilename(
+            title="Выберите Excel-файл с данными участников",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            initialdir=self.folder_path.get()
+        )
+        if not excel_path:
+            return
+        
+        # Выбор шаблона
+        template = self.template_path.get()
+        if not template or not os.path.exists(template):
+            template = filedialog.askopenfilename(
+                title="Выберите шаблон акта",
+                filetypes=[("Word documents", "*.docx"), ("All files", "*.*")],
+                initialdir=self.folder_path.get()
+            )
+            if not template:
+                return
+            self.template_path.set(template)
+        
+        # Выбор папки для сохранения
+        output_dir = filedialog.askdirectory(
+            title="Выберите папку для сохранения актов",
+            initialdir=os.path.join(self.folder_path.get(), "Акты")
+        )
+        if not output_dir:
+            return
+        
+        self.running.set(True)
+        self.run_button.config(state='disabled')
+        self.acts_button.config(state='disabled', text="Заполнение...")
+        self.progress.start()
+        
+        thread = threading.Thread(
+            target=self._process_acts,
+            args=(excel_path, template, output_dir),
+            daemon=True
+        )
+        thread.start()
+
+    def _process_acts(self, excel_path, template_path, output_dir):
+        """Обработка заполнения актов в фоновом потоке."""
+        logger = logging.getLogger()
+        try:
+            logger.info("="*60)
+            logger.info("ЗАПОЛНЕНИЕ АКТОВ ИЗ EXCEL")
+            logger.info("="*60)
+            
+            from docx_filler import DocxFiller
+            import openpyxl
+            
+            wb = openpyxl.load_workbook(excel_path)
+            ws = wb.active
+            
+            headers = [cell.value for cell in ws[1]]
+            
+            participants = []
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if not any(row):
+                    continue
+                
+                participant = {
+                    'ФИО': str(row[0]) if row[0] else '-',
+                    'телефон': str(row[1]) if len(row) > 1 and row[1] else '-',
+                    'email': str(row[2]) if len(row) > 2 and row[2] else '-',
+                    'доп_данные': {}
+                }
+                
+                for i in range(3, len(headers)):
+                    if i < len(row) and row[i]:
+                        participant['доп_данные'][headers[i]] = str(row[i])
+                
+                participants.append(participant)
+            
+            if not participants:
+                logger.warning("Нет данных в Excel-файле")
+                return
+            
+            filler = DocxFiller(template_path)
+            created = filler.fill_multiple_acts(participants, output_dir)
+            
+            logger.info(f"✓ Создано {len(created)} актов")
+            logger.info("="*60)
+            logger.info("ГОТОВО")
+            
+        except Exception as e:
+            logger.error(f"Ошибка: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self.running.set(False)
+            self.progress.stop()
+            self.run_button.config(state='normal')
+            self.acts_button.config(state='normal', text="Заполнить акты из Excel")
     def setup_logging(self):
         """Настраивает логирование в Text виджет."""
         logger = logging.getLogger()

@@ -26,30 +26,19 @@ class DocxFiller:
         self.template_path = template_path
 
     def fill_single_act(self, participant: Dict, output_path: str) -> str:
-        """
-        Заполняет акт для одного участника.
-        
-        Args:
-            participant: словарь с данными участника
-            output_path: путь для сохранения готового акта
-            
-        Returns:
-            путь к созданному файлу
-        """
         try:
             doc = Document(self.template_path)
             
-            # Собираем все данные для замены
+            # Собираем все данные для замены (пустые -> "-")
             replacements = {
-                # Основные данные
-                'ФИО': participant.get('ФИО', ''),
-                'телефон': participant.get('телефон', ''),
-                'email': participant.get('email', ''),
+                'ФИО': participant.get('ФИО') or '-',
+                'телефон': participant.get('телефон') or '-',
+                'email': participant.get('email') or '-',
             }
             
-            # Добавляем дополнительные данные с префиксом
+            # Добавляем дополнительные данные
             for key, value in participant.get('доп_данные', {}).items():
-                replacements[key] = value
+                replacements[key] = value if value and str(value).strip() else '-'
             
             # Замена в параграфах
             for paragraph in doc.paragraphs:
@@ -62,12 +51,10 @@ class DocxFiller:
                         for paragraph in cell.paragraphs:
                             self._replace_in_paragraph(paragraph, replacements)
             
-            # Создаём папку, если нужно
             output_dir = os.path.dirname(output_path)
-            if output_dir:  # Создаём директорию только если она указана в пути
+            if output_dir:
                 os.makedirs(output_dir, exist_ok=True)
             
-            # Сохраняем
             doc.save(output_path)
             logger.info(f"Акт сохранён: {output_path}")
             return output_path
@@ -75,7 +62,6 @@ class DocxFiller:
         except Exception as e:
             logger.error(f"Ошибка при заполнении акта для {participant.get('ФИО', '')}: {e}")
             raise
-
     def fill_multiple_acts(
         self, 
         participants: List[Dict], 
@@ -109,9 +95,11 @@ class DocxFiller:
                 logger.error(f"Не удалось создать акт для {name}: {e}")
                 
         return created_files
+    # docx_filler.py (исправленный метод _replace_in_paragraph)
     def _replace_in_paragraph(self, paragraph, replacements: Dict[str, str]):
         """
         Заменяет все {{ключ}} в параграфе за один проход, сохраняя форматирование.
+        Пустые значения заменяются на "-".
         """
         full_text = paragraph.text
         if '{{' not in full_text:
@@ -120,7 +108,9 @@ class DocxFiller:
         # Заменяем все плейсхолдеры в тексте
         for key, value in replacements.items():
             placeholder = f'{{{{{key}}}}}'
-            full_text = full_text.replace(placeholder, str(value))
+            # Если значение пустое или None, подставляем "-"
+            safe_value = str(value).strip() if value and str(value).strip() else "-"
+            full_text = full_text.replace(placeholder, safe_value)
 
         if full_text != paragraph.text:
             # Сохраняем форматирование первого run
@@ -138,7 +128,7 @@ class DocxFiller:
             paragraph.clear()
             run = paragraph.add_run(full_text)
             
-            # Применяем сохранённое форматирование через .font
+            # Применяем сохранённое форматирование
             if bold is not None:
                 run.font.bold = bold
             if italic is not None:
