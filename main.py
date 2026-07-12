@@ -66,7 +66,13 @@ def parse_pdfs(root_dir: str, triggers: set = None, pdf_trigger: str = None):
         
         for p in participants:
             # Уникальный ключ: ФИО + дата рождения
-            key = (p.get('ФИО', ''), p.get('доп_данные', {}).get('дата_рождения', ''))
+            dop = p.get('доп_данные', {})
+            key = (
+                p.get('ФИО', ''),
+                dop.get('дата_рождения', ''),
+                dop.get('договор_№', ''),
+                dop.get('кадастровый_номер', '')
+            )
             if key not in seen_participants:
                 seen_participants.add(key)
                 all_participants.append(p)

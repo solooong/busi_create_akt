@@ -328,7 +328,9 @@ class Application(Frame):
                 logger.info(f"[{i}/{len(pdf_files)}] Обрабатывается: {os.path.basename(pdf_path)}")
                 participants = parser.parse(pdf_path, {'trigger_section': pdf_trigger})
                 for p in participants:
-                    key = (p.get('ФИО', ''), p.get('доп_данные', {}).get('дата_рождения', ''))
+                    dop = p.get('доп_данные', {})
+                    key = (p.get('ФИО', ''),dop.get('дата_рождения', ''),
+                        dop.get('договор_№', ''),dop.get('кадастровый_номер', ''))
                     if key not in seen:
                         seen.add(key)
                         all_participants.append(p)
