@@ -183,7 +183,7 @@ class Application(Frame):
             daemon=True
         )
         thread.start()
-
+        
     def _process_acts(self, excel_path, template_path, output_dir):
         """Обработка заполнения актов в фоновом потоке."""
         logger = logging.getLogger()
@@ -218,12 +218,26 @@ class Application(Frame):
                 
                 participants.append(participant)
             
+            # === НОВОЕ: Удаление дубликатов участников по ключу ===
+            unique_participants = []
+            seen_keys = set()
+            for p in participants:
+                dop = p.get('доп_данные', {})
+                # Ключ для уникальности: ФИО + номер договора + паспорт
+                key = (p.get('ФИО'), dop.get('договор_№'), dop.get('паспорт'))
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    unique_participants.append(p)
+            
+            participants = unique_participants
+            # ============================================================
+            
             if not participants:
                 logger.warning("Нет данных в Excel-файле")
                 return
             
             filler = DocxFiller(template_path)
-            created = filler.fill_multiple_acts(participants, output_dir)
+            created = filler.fill_grouped_acts(participants, output_dir)
             
             logger.info(f"✓ Создано {len(created)} актов")
             logger.info("="*60)
@@ -374,7 +388,7 @@ class Application(Frame):
                 os.makedirs(akt_dir, exist_ok=True)
                 
                 filler = DocxFiller(template)
-                created = filler.fill_multiple_acts(all_participants, akt_dir)
+                created = filler.fill_grouped_acts(all_participants, akt_dir)
                 logger.info(f"Создано актов: {len(created)}")
             else:
                 logger.info("Шаблон акта не указан или не найден — акты не созданы")
@@ -395,7 +409,8 @@ class Application(Frame):
         """Сбрасывает состояние UI после завершения обработки."""
         self.running.set(False)
         self.progress.stop()
-        self.run_button.config(state='normal', text="Запустить обработку")
+        self.run_button.config(state='normal', text="Запустить обработку PDF")
+        self.acts_button.config(state='normal', text="Заполнить акты из Excel")
 
 
 if __name__ == "__main__":

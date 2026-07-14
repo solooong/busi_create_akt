@@ -100,7 +100,7 @@ def parse_pdfs(root_dir: str, triggers: set = None, pdf_trigger: str = None):
         os.makedirs(akt_dir, exist_ok=True)
         
         filler = DocxFiller(template_path)
-        created = filler.fill_multiple_acts(all_participants, akt_dir)
+        created = filler.fill_grouped_acts(all_participants, akt_dir)
         logger.info(f"Создано актов: {len(created)}")
     else:
         logger.info(f"Шаблон акта не найден: {template_path}")
@@ -179,7 +179,7 @@ def fill_acts_from_excel(excel_path: str, template_path: str, output_dir: str):
     
     # Заполняем акты
     filler = DocxFiller(template_path)
-    created = filler.fill_multiple_acts(participants, output_dir)
+    created = filler.fill_grouped_acts(participants, output_dir)
     
     logger.info(f"Создано актов: {len(created)}")
     logger.info(f"{'='*60}")
