@@ -159,7 +159,7 @@ class DDUParser(BaseParser):
         after_start = text[start_match.end():]
 
         end_match = re.search(
-            r'именуемая?\s*(?:\([^)]*\))?\s*в\s+дальнейшем\s+«Участник\s+долевого\s+строительства»',
+            r'именуем(?:ый|ая|ые)?\s*(?:\([^)]*\))?\s*в\s+дальнейшем\s+«Участник\s+долевого\s+строительства»',
             after_start,
             re.IGNORECASE
         )
@@ -234,39 +234,87 @@ class DDUParser(BaseParser):
             logger.info(f"Найден в шапке: {name}")
 
         return participants, contract_info
+    import re
+    from typing import List, Dict
+
     def _extract_contacts_from_end(self, text: str) -> List[Dict]:
         """Извлекает контакты из последних страниц (все найденные)."""
         if not text:
             return []
+        # Список возможных вариаций заголовка раздела
+        triggers = [
+            r'участники\s+долевого\s+строительства',
+            r'участник\s+долевого\s+строительства',
+            r'долевое\s+строительство',
+            r'удс',  # Общепринятая аббревиатура
+            r'стороны\s+договора',  # Альтернативный заголовок реквизитов
+            r'инвестор',  # Иногда используется в старых или смешанных договорах
+        ]
 
-        # Ищем раздел "Участники долевого строительства:" (он есть в реквизитах)
-        trigger_idx = text.lower().find('участники долевого строительства')
-        if trigger_idx == -1:
-            logger.warning("Раздел 'Участники долевого строительства' не найден в реквизитах")
+        # Объединяем триггеры в один регулярное выражение для быстрого поиска
+        trigger_pattern = re.compile('|'.join(triggers), re.IGNORECASE)
+
+        # Ищем совпадение
+        match = trigger_pattern.search(text)
+
+        if not match:
+            logger.warning("Раздел 'Участники долевого строительства' или его альтернативы не найдены в реквизитах")
             return []
+
+        # Индекс начала найденного раздела
+        trigger_idx = match.start()
+                                    # Ищем раздел "Участники долевого строительства:" (он есть в реквизитах)
+                                    # trigger_idx = text.lower().find('участники долевого строительства')
+                                    # if trigger_idx == -1:
+                                    #     logger.warning("Раздел 'Участники долевого строительства' не найден в реквизитах")
+                                    #     return []
 
         after_trigger = text[trigger_idx:]
 
         # Собираем все email'ы
         emails = re.findall(r'[\w\.-]+@[\w\.-]+\.\w+', after_trigger)
 
-        # Собираем все телефоны (строки с +7 или 8)
+        # Собираем все телефоны
         phones = []
+        # Универсальный паттерн: обрабатывает +7, 7, 8 и любые разделители (пробелы, дефисы, скобки)
+        phone_pattern = re.compile(
+            r'^(?:\+7|7|8)?\s*\(?(\d{3})\)?[\s\-]?(\d{3})[\s\-]?(\d{2})[\s\-]?(\d{2})$'
+        )
+        
         for line in after_trigger.splitlines():
             line = line.strip()
-            if re.match(r'^\+7\s*\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}$', line):
-                phones.append(line)
-            elif re.match(r'^8\s*\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}$', line):
+            if phone_pattern.match(line):
                 phones.append(line)
 
         # Собираем все ИНН (после триггера, чтобы не захватить ИНН застройщика)
         inns = re.findall(r'ИНН:\s*(\d{10,12})', after_trigger, re.IGNORECASE)
 
         # Собираем все СНИЛС
-        snils_list = re.findall(r'СНИЛС:\s*(\d{3}-\d{3}-\d{3}\s?\d{2})', after_trigger, re.IGNORECASE)
+        snils_list = []
+        # Паттерн ищет префикс "СНИЛС:" (с пробелами или без) и 11 цифр с любыми разделителями (пробелы, дефисы, микс)
+        snils_pattern = re.compile(
+            r'СНИЛС:\s*(\d{3})[\s\-]*(\d{3})[\s\-]*(\d{3})[\s\-]*(\d{2})', 
+            re.IGNORECASE
+        )
+        
+        # Находим все совпадения. findall вернет кортеж из 4 групп цифр: (123, 456, 789, 01)
+        for match in snils_pattern.findall(after_trigger):
+            # Собираем группы в единый стандартный формат: "123-456-789 01"
+            formatted_snils = f"{match[0]}-{match[1]}-{match[2]} {match[3]}"
+            snils_list.append(formatted_snils)
 
         # Определяем количество участников по числу уникальных email или телефонов
         num_participants = max(len(emails), len(phones), len(inns), len(snils_list))
+
+          # --- НОВОЕ: Собираем все коды подразделений ---
+        # На случай, если внизу написали без дефиса, принудительно форматируем в "123-456"
+        codes_list = []
+        code_pattern = re.compile(r'код\s+подразделения:\s*(\d{3})[\s\-]*(\d{3})', re.IGNORECASE)
+        for match in code_pattern.findall(after_trigger):
+            codes_list.append(f"{match[0]}-{match[1]}")
+
+        # Пересчитываем максимум с учетом кодов подразделений
+        num_participants = max(len(emails), len(phones), len(inns), len(snils_list), len(codes_list))
 
         contacts_list = []
         for i in range(num_participants):
@@ -275,10 +323,11 @@ class DDUParser(BaseParser):
                 'телефон': phones[i] if i < len(phones) else '',
                 'ИНН': inns[i] if i < len(inns) else '',
                 'СНИЛС': snils_list[i] if i < len(snils_list) else '',
+                'код_подразделения': codes_list[i] if i < len(codes_list) else '', # Записываем в словарь
             }
             contacts_list.append(contact)
-
         return contacts_list
+
     @staticmethod
     def get_full_text(pdf_path: str) -> str:
         """Извлекает весь текст из PDF для проверки AI."""
@@ -320,7 +369,10 @@ class DDUParser(BaseParser):
                 participants = []
                 for i, person in enumerate(header_participants):
                     contact = contacts_list[i] if i < len(contacts_list) else {}
-
+                        # Получаем код подразделения из верхней функции (person) и нижней (contact)
+                    code_top = person.get('код_подразделения', '').strip()
+                    code_bottom = contact.get('код_подразделения', '').strip()
+                    final_code = code_top or code_bottom
                     participant = {
                         'ФИО': person['ФИО'],
                         'телефон': contact.get('телефон', ''),
@@ -330,7 +382,7 @@ class DDUParser(BaseParser):
                             'паспорт': person.get('паспорт', ''),
                             'дата_выдачи': person.get('дата_выдачи', ''),
                             'кем_выдан': person.get('кем_выдан', ''),
-                            'код_подразделения': person.get('код_подразделения', ''),
+                            'код_подразделения': final_code,
                             'адрес_проживания': person.get('адрес_проживания', ''),
                             'корр_адрес': person.get('корр_адрес', ''),
                             'СНИЛС': contact.get('СНИЛС', ''),
