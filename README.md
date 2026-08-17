@@ -152,5 +152,5 @@ PDF-файл имеет нестандартную структуру шапки
 2. Добавьте его в `main.py` по аналогии с `DDUParser`
 
 ## Лицензия
-
+ pyinstaller --noconfirm --onefile --windowed --icon="key_19699.ico" --name="Create_akt" --paths="C:\Users\user\AppData\Local\Programs\Python\Python313\Lib" --collect-all tkinter --hidden-import=_tkinter --add-data "C:\Users\user\AppData\Local\Programs\Python\Python313\tcl\tcl8.6;_tcl_data" --add-data "C:\Users\user\AppData\Local\Programs\Python\Python313\tcl\tk8.6;_tk_data" --add-binary "C:\Users\user\AppData\Local\Programs\Python\Python313\DLLs\tcl86t.dll;." --add-binary "C:\Users\user\AppData\Local\Programs\Python\Python313\DLLs\tk86t.dll;." gui_app.py
 Для внутреннего использования.
