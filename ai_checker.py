@@ -19,7 +19,7 @@ class AIChecker:
         # Удалённый сервер с токеном
         checker = AIChecker(
             api_url="http://26.250.90.120:1234/v1/chat/completions",
-            api_token="sk-lm-oPeN5xTy:JWPSzgAj1W44Rouiv3qN"
+            api_token=""
         )
         
         # OpenAI API
